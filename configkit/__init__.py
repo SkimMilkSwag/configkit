@@ -22,14 +22,17 @@ Only the standard library is required; PyYAML is used for YAML files.
 """
 
 from .core import Config, ConfigError, field, load, loads
+from .env import EnvError, resolve_env
 from .schema import Spec, ValidationError
 
 __all__ = [
     "Config",
     "ConfigError",
+    "EnvError",
     "Spec",
     "ValidationError",
     "field",
     "load",
     "loads",
+    "resolve_env",
 ]

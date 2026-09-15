@@ -141,14 +141,27 @@ def _read_source(path: str) -> str:
         return fh.read()
 
 
+def _resolve(data: Any, env) -> Any:
+    """Resolve ${VAR} placeholders in the raw document before validation."""
+    try:
+        from .env import resolve_env
+    except ImportError as exc:  # pragma: no cover - stdlib-only failure
+        raise ConfigError(f"cannot resolve environment variables: {exc}") from exc
+    return resolve_env(data, env=env)
+
+
 def loads(
     text: str,
     schema: Dict[str, Union[Spec, type, Sequence[type]]],
     fmt: str = "json",
+    env=None,
 ) -> Config:
     """Parse ``text`` (JSON or YAML) and validate it against ``schema``.
 
-    ``fmt`` is ``"json"`` or ``"yaml"``. Returns a validated, immutable
+    ``fmt`` is ``"json"`` or ``"yaml"``. When ``env`` is given (a mapping or a
+    callable used as the variable lookup; defaults to ``os.environ``),
+    ``${VAR}`` and ``${VAR:default}`` placeholders in any string value are
+    substituted before validation. Returns a validated, immutable
     :class:`Config`.
     """
     if fmt not in ("json", "yaml"):
@@ -172,6 +185,8 @@ def loads(
         if not isinstance(data, dict):
             raise ConfigError("top-level value must be a mapping/object")
 
+    if env is not None:
+        data = _resolve(data, env)
     resolved = validate(data, schema, "$")
     return Config(resolved)
 
@@ -180,15 +195,18 @@ def load(
     path: str,
     schema: Dict[str, Union[Spec, type, Sequence[type]]],
     fmt: Union[str, None] = None,
+    env=None,
 ) -> Config:
     """Load a config file (``.json`` or ``.yaml``/``.yml``) and validate it.
 
     The format is inferred from the extension unless ``fmt`` is given
-    explicitly. Returns a validated, immutable :class:`Config`.
+    explicitly. When ``env`` is given, ``${VAR}`` placeholders in string
+    values are substituted before validation. Returns a validated, immutable
+    :class:`Config`.
     """
     if fmt is None:
         if path.endswith((".yaml", ".yml")):
             fmt = "yaml"
         else:
             fmt = "json"
-    return loads(_read_source(path), schema, fmt=fmt)
+    return loads(_read_source(path), schema, fmt=fmt, env=env)
