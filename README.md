@@ -9,6 +9,10 @@ typos fail loudly instead of silently producing `None`.
 - **Zero hard dependencies** — stdlib only; PyYAML is used for `.yaml`/`.yml` files.
 - **Declarative schemas** — required types, defaults, min/max bounds, string
   patterns, allowed choices, nested dict schemas, list item types.
+- **Env-var substitution** — `${VAR}` and `${VAR:default}` in any string value,
+  resolved before validation so secrets can live outside the file.
+- **CLI checker** — `python -m configkit config.yaml --schema schema.yaml` for
+  CI-friendly validation with exit codes.
 - **Strict by design** — `True` is not an `int`, unknown keys raise, missing
   required keys raise. Fail at load time, not at runtime.
 
@@ -58,6 +62,36 @@ A schema entry can be:
 `field()` arguments: `types`, `default`, `minimum`, `maximum`, `min_length`,
 `max_length`, `pattern` (regex, fullmatch), `choices`, `schema` (nested),
 `items` (element spec for lists).
+
+## Environment-variable substitution
+
+String values may contain `${VAR}` placeholders, resolved from the process
+environment (or any mapping/callable passed as `env`) before validation runs:
+
+```python
+import os
+from configkit import loads
+
+cfg = loads('{"dsn": "${DB_USER}:${DB_PASS}@${HOST:localhost}"}',
+            {"dsn": str}, env=os.environ)
+# ${DB_USER} and ${DB_PASS} must be set; ${HOST:localhost} falls back if unset
+```
+
+Unset variables without a default raise `EnvError` — a typo'd name fails loudly
+rather than leaking through as an empty string.
+
+## CLI checker
+
+Validate a config file against a schema from the command line (CI-friendly):
+
+```bash
+python -m configkit config.yaml --schema schema.yaml
+# exit 0 + "config.yaml: OK" on success
+# exit 1 + one line per problem on stderr on failure
+```
+
+The schema file is JSON or YAML; type names are written as strings (`"int"`,
+`"str"`, ...) and resolved automatically.
 
 ## Errors
 
