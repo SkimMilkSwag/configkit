@@ -1,0 +1,12 @@
+{
+  "host": "0.0.0.0",
+  "port": 8080,
+  "workers": 4,
+  "mode": "fast",
+  "tags": ["web", "api"],
+  "db": {
+    "user": "app",
+    "password": "s3cret",
+    "pool_size": 10
+  }
+}

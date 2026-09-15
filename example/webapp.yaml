@@ -1,0 +1,14 @@
+# Example config file (YAML) for the configkit integration test.
+# Same shape as webapp.json, different values -- exercises the YAML code path
+# end-to-end (PyYAML parse -> env substitution -> schema validation -> Config).
+host: example.internal
+port: 9443
+workers: 8
+mode: safe
+tags:
+  - web
+  - admin
+db:
+  user: app_ro
+  password: readonly-pass
+  pool_size: 25
