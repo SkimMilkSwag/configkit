@@ -93,6 +93,23 @@ def test_numeric_bounds_enforced():
             loads(json.dumps({"host": "x", "port": bad_port}), SCHEMA)
 
 
+def test_numeric_bounds_apply_to_floats_and_skip_non_numbers():
+    # A float value against an int-typed bounded field fails the *type* check
+    # first ("expected int, got float"), so bounds never see a float here --
+    # but a float that did pass a wider type gate must be range-checked too.
+    with pytest.raises(ValidationError, match="port: expected int"):
+        loads(json.dumps({"host": "x", "port": 70000.5}), SCHEMA)
+    # Out-of-range float on a numeric (int|float) field trips the bound check.
+    wide = {"n": field((int, float), minimum=1, maximum=10)}
+    with pytest.raises(ValidationError, match="above maximum"):
+        loads(json.dumps({"n": 20.5}), wide)
+    # A string value on a bounded spec must not trip the numeric comparison with
+    # a TypeError -- it fails the type check first (and bounds are skipped for it).
+    schema = {"s": field(str, minimum=1, maximum=9)}
+    with pytest.raises(ValidationError):
+        loads(json.dumps({"s": 5}), schema)
+
+
 def test_choices_constraint():
     schema = {"mode": field(str, choices=("fast", "safe"))}
     assert loads('{"mode": "safe"}', schema).mode == "safe"
