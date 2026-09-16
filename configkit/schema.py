@@ -146,10 +146,15 @@ def coerce_value(value: Any, spec: Spec, path: str) -> Any:
             path, "expected %s, got %s" % (spec.describe(), type(value).__name__)
         )
 
-    if spec.minimum is not None and value < spec.minimum:
-        raise ValidationError(path, "%r is below minimum %r" % (value, spec.minimum))
-    if spec.maximum is not None and value > spec.maximum:
-        raise ValidationError(path, "%r is above maximum %r" % (value, spec.maximum))
+    # Numeric bounds only apply to int/float values. Without this guard a str
+    # value carrying a minimum (e.g. a bounded-by-mistake string field, or a
+    # value that passed the type check before bounds were added) would trip the
+    # comparison and raise TypeError on Python 3 ("<" between str and int).
+    if isinstance(value, (int, float)):
+        if spec.minimum is not None and value < spec.minimum:
+            raise ValidationError(path, "%r is below minimum %r" % (value, spec.minimum))
+        if spec.maximum is not None and value > spec.maximum:
+            raise ValidationError(path, "%r is above maximum %r" % (value, spec.maximum))
 
     if isinstance(value, str):
         if spec.min_length is not None and len(value) < spec.min_length:
