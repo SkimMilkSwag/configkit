@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
-from typing import Any, Dict, List, Sequence, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union, Callable
 
 from .schema import Spec, ValidationError, validate
 
@@ -20,16 +20,16 @@ _UNSET = object()
 
 
 def field(
-    types=_UNSET,
+    types: Union[type, Sequence[type], Any] = _UNSET,
     default: Any = None,
-    minimum: Any = None,
-    maximum: Any = None,
-    min_length: Any = None,
-    max_length: Any = None,
-    pattern: Any = None,
-    choices: Any = None,
-    schema: Any = None,
-    items: Any = None,
+    minimum: Optional[float] = None,
+    maximum: Optional[float] = None,
+    min_length: Optional[int] = None,
+    max_length: Optional[int] = None,
+    pattern: Optional[str] = None,
+    choices: Optional[Sequence[Any]] = None,
+    schema: Optional[Dict[str, Any]] = None,
+    items: Optional[Any] = None,
 ) -> Spec:
     """Build a ``Spec`` with named arguments -- friendlier than positional dataclass.
 
@@ -48,11 +48,11 @@ def field(
         # the bool-vs-int guard strict for numeric bounds) plus container types
         # so a spec with ``items`` or a collection default still validates its
         # contents rather than rejecting the whole value.
-        type_tuple: tuple = (str, int, float, dict, list, tuple)
+        type_tuple: Tuple[type, ...] = (str, int, float, dict, list, tuple)
     elif isinstance(types, type):
-        type_tuple = (types,)  # type: ignore[assignment]
+        type_tuple = (types,)
     else:
-        type_tuple = tuple(types)  # type: ignore[arg-type]
+        type_tuple = tuple(types)
     return Spec(
         types=type_tuple,
         default=copy.deepcopy(default),
@@ -141,7 +141,7 @@ def _read_source(path: str) -> str:
         return fh.read()
 
 
-def _resolve(data: Any, env) -> Any:
+def _resolve(data: Any, env: Union[Mapping[str, str], Callable[[str], Optional[str]], None]) -> Any:
     """Resolve ${VAR} placeholders in the raw document before validation."""
     try:
         from .env import resolve_env
@@ -154,7 +154,7 @@ def loads(
     text: str,
     schema: Dict[str, Union[Spec, type, Sequence[type]]],
     fmt: str = "json",
-    env=None,
+    env: Optional[Union[Mapping[str, str], Callable[[str], Optional[str]]]] = None,
 ) -> Config:
     """Parse ``text`` (JSON or YAML) and validate it against ``schema``.
 
@@ -195,7 +195,7 @@ def load(
     path: str,
     schema: Dict[str, Union[Spec, type, Sequence[type]]],
     fmt: Union[str, None] = None,
-    env=None,
+    env: Optional[Union[Mapping[str, str], Callable[[str], Optional[str]]]] = None,
 ) -> Config:
     """Load a config file (``.json`` or ``.yaml``/``.yml``) and validate it.
 
