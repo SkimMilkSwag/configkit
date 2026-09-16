@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Callable
+from typing import Any, Callable, Mapping, Optional, Union
 
 __all__ = ["EnvError", "resolve_env"]
 
@@ -76,7 +76,8 @@ def _expand(value: str, env: Callable[[str], "str | None"]) -> str:
 
 
 def resolve_env(
-    data: Any, env: "os._Environ[str]" | Callable[[str], str] = os.environ
+    data: Any,
+    env: Union[Mapping[str, str], Callable[[str], Optional[str]], None] = os.environ,
 ) -> Any:
     """Return a copy of ``data`` with every ``${VAR}`` placeholder resolved.
 
@@ -90,10 +91,12 @@ def resolve_env(
     than raising -- only a genuinely unset variable does.
     """
 
-    def lookup(var: str) -> "str | None":
+    def lookup(var: str) -> Optional[str]:
         if callable(env):
             return env(var)
-        return env.get(var)  # type: ignore[union-attr]
+        if env is None:
+            return None
+        return env.get(var)
 
     def walk(node: Any) -> Any:
         if isinstance(node, str):

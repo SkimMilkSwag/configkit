@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import os
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union, Callable
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union, Callable, cast
 
 from .schema import Spec, ValidationError, validate
 
@@ -121,7 +121,7 @@ class Config:
 
     def to_dict(self) -> Dict[str, Any]:
         """Return a deep plain-dict copy (Config objects reverted to dicts)."""
-        return _unwrap(object.__getattribute__(self, "_data"))
+        return cast(Dict[str, Any], _unwrap(object.__getattribute__(self, "_data")))
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Config):
@@ -152,7 +152,7 @@ def _resolve(data: Any, env: Union[Mapping[str, str], Callable[[str], Optional[s
 
 def loads(
     text: str,
-    schema: Dict[str, Union[Spec, type, Sequence[type]]],
+    schema: Mapping[str, Union[Spec, type, Sequence[type]]],
     fmt: str = "json",
     env: Optional[Union[Mapping[str, str], Callable[[str], Optional[str]]]] = None,
 ) -> Config:
@@ -193,7 +193,7 @@ def loads(
 
 def load(
     path: str,
-    schema: Dict[str, Union[Spec, type, Sequence[type]]],
+    schema: Mapping[str, Union[Spec, type, Sequence[type]]],
     fmt: Union[str, None] = None,
     env: Optional[Union[Mapping[str, str], Callable[[str], Optional[str]]]] = None,
 ) -> Config:

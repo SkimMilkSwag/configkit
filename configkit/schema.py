@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Type, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Type, Union
 
 __all__ = ["Spec", "ValidationError", "coerce_value", "validate"]
 
@@ -186,7 +186,7 @@ def coerce_value(value: Any, spec: Spec, path: str) -> Any:
 
 def validate(
     data: Dict[str, Any],
-    schema: Dict[str, Union[Spec, Type[Any], Sequence[Type[Any]]]],
+    schema: Mapping[str, Union[Spec, Type[Any], Sequence[Type[Any]]]],
     path: str = "$",
 ) -> Dict[str, Any]:
     """Validate (and resolve defaults for) a dict against a schema.
