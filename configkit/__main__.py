@@ -1,27 +1,33 @@
-"""configkit CLI -- validate a config file against a schema.
+"""configkit CLI -- validate or merge config files from the command line.
 
 Usage::
 
+    # check (default; also callable as `configkit check`)
     python -m configkit config.yaml --schema schema.yaml
     python -m configkit config.json --schema schema.json
 
-The schema file is itself JSON or YAML (by extension) describing the expected
-shape of the target; each top-level key maps to a spec entry in any form the
-loader accepts (a type, a tuple of types, a dict form, or a pre-built ``Spec``).
-The target is then validated against that schema.
+    # merge several config files (later wins, deep merge); prints the result
+    python -m configkit merge base.yaml overrides.yaml
+    python -m configkit merge a.json b.yaml --format yaml
 
-Exit codes: 0 when the config is valid (prints ``<config>: OK``), 1 on any
-I/O or validation problem -- one line per problem on stderr, so the output
-drops straight into CI logs.
+The check command validates a target file against a schema: the schema file is
+itself JSON or YAML (by extension) describing the expected shape of the target;
+each top-level key maps to a spec entry in any form the loader accepts (a type,
+a tuple of types, a dict form, or a pre-built ``Spec``).
+
+Exit codes: 0 on success (``<config>: OK`` for check, the merged document on
+stdout for merge), 1 on any I/O or validation problem -- one line per problem
+on stderr, so the output drops straight into CI logs.
 """
 
 from __future__ import annotations
 
 import argparse
+import copy
 import json as _json
 import os
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 from .core import ConfigError
 from .schema import Spec, ValidationError, _spec_from_any
@@ -122,35 +128,129 @@ def check_file(config_path: str, schema: Dict[str, Spec]) -> List[str]:
         return [f"{config_path}: {exc}"]
 
 
-def main(argv: "List[str] | None" = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="python -m configkit",
-        description="Validate a JSON or YAML config file against a schema.",
-    )
-    parser.add_argument("config", help="path to the config file to check")
-    parser.add_argument(
-        "--schema",
-        required=True,
-        help="path to the schema file (JSON or YAML)",
-    )
-    args = parser.parse_args(argv)
+# --- merge -------------------------------------------------------------------
 
+
+def deep_merge(base: Any, override: Any) -> Any:
+    """Recursively merge two plain documents; ``override`` wins.
+
+    Dicts are merged key-by-key (so a nested section present in both is
+    combined, not clobbered); any non-dict value — lists, scalars, and dicts
+    with different shapes on the same side — replaces the base value
+    wholesale. The inputs are not mutated: a new document is returned.
+    """
+    if isinstance(base, dict) and isinstance(override, dict):
+        merged: Dict[str, Any] = {k: o for k, o in override.items()}
+        for k, b in base.items():
+            if k in merged:
+                merged[k] = deep_merge(b, merged[k])
+            else:
+                merged[k] = copy.deepcopy(b)
+        return merged
+    return copy.deepcopy(override)
+
+
+def merge_configs(paths: "List[str]") -> Dict[str, Any]:
+    """Read the raw documents at ``paths`` and merge them left to right.
+
+    Later files override earlier ones (deep merge for mappings, replace
+    otherwise). Raises ``ConfigError`` on I/O or format problems; a non-dict
+    top level in any file is an error because merging needs mappings.
+    """
+    if not paths:
+        raise ConfigError("merge: at least one config file is required")
+    merged: Any = {}
+    for path in paths:
+        raw = _read_raw(path)
+        merged = deep_merge(merged, raw)
+    return cast(Dict[str, Any], merged)
+
+
+def render_merged(doc: Dict[str, Any], fmt: str) -> str:
+    """Serialize a merged document as JSON (pretty, 2-space) or YAML.
+
+    ``fmt`` is ``"json"`` or ``"yaml"``; anything else raises ``ConfigError``.
+    """
+    if fmt == "json":
+        return _json.dumps(doc, indent=2) + "\n"
+    if fmt == "yaml":
+        try:
+            import yaml
+        except ImportError as exc:
+            raise ConfigError("PyYAML is required to emit YAML") from exc
+        return cast(str, yaml.safe_dump(doc, sort_keys=False))
+    raise ConfigError(f"unsupported output format {fmt!r} (use 'json' or 'yaml')")
+
+
+def _run_check(config_path: str, schema_path: str) -> int:
     try:
-        schema = _load_schema(args.schema)
+        schema = _load_schema(schema_path)
     except ValidationError as exc:
         print(f"{exc.path}: {exc.message}", file=sys.stderr)
         return 1
     except ConfigError as exc:
-        print(f"{args.schema}: {exc}", file=sys.stderr)
+        print(f"{schema_path}: {exc}", file=sys.stderr)
         return 1
 
-    problems = check_file(args.config, schema)
+    problems = check_file(config_path, schema)
     if not problems:
-        print(f"{args.config}: OK")
+        print(f"{config_path}: OK")
         return 0
     for line in problems:
         print(line, file=sys.stderr)
     return 1
+
+
+def _run_merge(paths: List[str], fmt: str) -> int:
+    try:
+        merged = merge_configs(paths)
+    except ConfigError as exc:
+        print(f"configkit: {exc}", file=sys.stderr)
+        return 1
+    try:
+        sys.stdout.write(render_merged(merged, fmt))
+    except ConfigError as exc:
+        print(f"configkit: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def main(argv: "List[str] | None" = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # If no subcommand is given, treat the args as `check` so the historical
+    # form `python -m configkit cfg.yaml --schema s.yaml` keeps working.
+    if not argv or argv[0] not in ("check", "merge"):
+        argv = ["check"] + argv
+
+    parser = argparse.ArgumentParser(
+        prog="python -m configkit",
+        description="Validate or merge JSON/YAML config files.",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    check_p = subparsers.add_parser(
+        "check", help="validate a config file against a schema (default command)"
+    )
+    check_p.add_argument("config", help="path to the config file to check")
+    check_p.add_argument("--schema", required=True, help="path to the schema file (JSON or YAML)")
+
+    merge_p = subparsers.add_parser(
+        "merge", help="merge config files (later wins, deep merge); print the result"
+    )
+    merge_p.add_argument("configs", nargs="+", help="config files to merge, left to right")
+    merge_p.add_argument(
+        "--format",
+        dest="fmt",
+        default="json",
+        choices=["json", "yaml"],
+        help="output format (default: json)",
+    )
+
+    args = parser.parse_args(argv)
+
+    if getattr(args, "command", None) == "merge":
+        return _run_merge(list(args.configs), args.fmt)
+    return _run_check(args.config, args.schema)
 
 
 if __name__ == "__main__":

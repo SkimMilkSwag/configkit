@@ -12,7 +12,8 @@ typos fail loudly instead of silently producing `None`.
 - **Env-var substitution** — `${VAR}` and `${VAR:default}` in any string value,
   resolved before validation so secrets can live outside the file.
 - **CLI checker** — `python -m configkit config.yaml --schema schema.yaml` for
-  CI-friendly validation with exit codes.
+  CI-friendly validation with exit codes, plus a `merge` command that layers
+  config files (later wins, deep merge) for base/override setups.
 - **Strict by design** — `True` is not an `int`, unknown keys raise, missing
   required keys raise. Fail at load time, not at runtime.
 
@@ -91,7 +92,24 @@ python -m configkit config.yaml --schema schema.yaml
 ```
 
 The schema file is JSON or YAML; type names are written as strings (`"int"`,
-`"str"`, ...) and resolved automatically.
+`"str"`, ...) and resolved automatically. The `check` subcommand is optional —
+omitting it runs the same check.
+
+## Merging config files
+
+Layer a base config with overrides (12-factor style): later files win, dicts
+merge key-by-key, everything else replaces:
+
+```bash
+python -m configkit merge base.yaml overrides.yaml            # -> JSON on stdout
+python -m configkit merge base.yaml overrides.yaml --format yaml
+python -m configkit merge a.json b.json c.json                # left to right
+```
+
+Nested sections combine instead of clobbering (`db.pool` from the override
+keeps `db.user` from the base); lists and scalars are replaced wholesale.
+Exit 0 on success, 1 (with one line per problem) if any file is missing or
+malformed — so it slots into a deploy pipeline as-is.
 
 ## Errors
 
