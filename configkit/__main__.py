@@ -10,6 +10,9 @@ Usage::
     python -m configkit merge base.yaml overrides.yaml
     python -m configkit merge a.json b.yaml --format yaml
 
+    # diff two config files; one line per change (added / removed / replaced)
+    python -m configkit diff base.yaml deployed.yaml
+
 The check command validates a target file against a schema: the schema file is
 itself JSON or YAML (by extension) describing the expected shape of the target;
 each top-level key maps to a spec entry in any form the loader accepts (a type,
@@ -27,7 +30,7 @@ import copy
 import json as _json
 import os
 import sys
-from typing import Any, Dict, List, cast
+from typing import Any, Dict, List, Tuple, cast
 
 from .core import ConfigError
 from .schema import Spec, ValidationError, _spec_from_any
@@ -201,6 +204,76 @@ def _run_check(config_path: str, schema_path: str) -> int:
     return 1
 
 
+# --- diff --------------------------------------------------------------------
+
+
+def _format_value(value: Any) -> str:
+    """Render a config value for diff lines.
+
+    Strings are shown bare (no repr quotes), so output stays human-readable;
+    everything else uses ``repr``, which is unambiguous for numbers, booleans,
+    ``None``, lists and dicts (nested dicts render with the same compact form
+    a JSON consumer would see).
+    """
+    if isinstance(value, str):
+        return value
+    return repr(value)
+
+
+def diff_configs(a: Any, b: Any, prefix: str = "") -> List[str]:
+    """Diff two config documents as compact one-line-per-change strings.
+
+    Lines are ordered deterministically (sorted paths); ``prefix`` is a
+    dotted-path fragment prepended to every key of the change, used to report
+    nested locations correctly::
+
+        host: old -> new
+        db.pool_size: 5 -> 10
+        debug: added (true)
+        timeout: removed (30)
+        tags: replaced ([a, b] -> [c])
+
+    Two mappings are walked key by key (so nested sections report their own
+    changes instead of a wholesale ``replaced``); any other value change is a
+    single ``replaced`` line.  ``a`` is the left/base document and ``b`` the
+    right/override one, matching ``merge``'s argument order.
+    """
+    if isinstance(a, dict) and isinstance(b, dict):
+        lines: List[str] = []
+        for key in sorted(set(a) | set(b)):
+            path = f"{prefix}.{key}" if prefix else key
+            in_a, in_b = key in a, key in b
+            if in_a and in_b:
+                lines.extend(diff_configs(a[key], b[key], path))
+            elif in_b:
+                lines.append(f"{path}: added ({_format_value(b[key])})")
+            else:
+                lines.append(f"{path}: removed ({_format_value(a[key])})")
+        return lines
+    if a == b:
+        return []
+    return [f"{prefix}: replaced ({_format_value(a)} -> {_format_value(b)})"]
+
+
+def _run_diff(paths: "List[str]") -> int:
+    try:
+        docs = [_read_raw(path) for path in paths]
+    except ConfigError as exc:
+        print(f"configkit: {exc}", file=sys.stderr)
+        return 1
+    if len(docs) != 2:
+        print("configkit: diff takes exactly two config files", file=sys.stderr)
+        return 1
+    lines = diff_configs(docs[0], docs[1])
+    if not lines:
+        print(f"{paths[0]} and {paths[1]} are identical")
+        return 0
+    for line in lines:
+        print(line)
+    print(f"{len(lines)} change(s)")
+    return 0
+
+
 def _run_merge(paths: List[str], fmt: str) -> int:
     try:
         merged = merge_configs(paths)
@@ -219,12 +292,12 @@ def main(argv: "List[str] | None" = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # If no subcommand is given, treat the args as `check` so the historical
     # form `python -m configkit cfg.yaml --schema s.yaml` keeps working.
-    if not argv or argv[0] not in ("check", "merge"):
+    if not argv or argv[0] not in ("check", "merge", "diff"):
         argv = ["check"] + argv
 
     parser = argparse.ArgumentParser(
         prog="python -m configkit",
-        description="Validate or merge JSON/YAML config files.",
+        description="Validate, merge, or diff JSON/YAML config files.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -246,10 +319,21 @@ def main(argv: "List[str] | None" = None) -> int:
         help="output format (default: json)",
     )
 
+    diff_p = subparsers.add_parser(
+        "diff",
+        help="print what changed between two config files as a compact list",
+    )
+    diff_p.add_argument(
+        "configs", nargs=2, metavar="CONFIG",
+        help="two config files to compare (left is the base, right the override)",
+    )
+
     args = parser.parse_args(argv)
 
     if getattr(args, "command", None) == "merge":
         return _run_merge(list(args.configs), args.fmt)
+    if getattr(args, "command", None) == "diff":
+        return _run_diff(list(args.configs))
     return _run_check(args.config, args.schema)
 
 

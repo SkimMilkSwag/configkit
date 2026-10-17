@@ -111,6 +111,23 @@ keeps `db.user` from the base); lists and scalars are replaced wholesale.
 Exit 0 on success, 1 (with one line per problem) if any file is missing or
 malformed — so it slots into a deploy pipeline as-is.
 
+## Diffing two config files
+
+Print what changed between a base and an override as a compact, one-line-per-
+change list (`added` / `removed` / `replaced`, dotted paths for nested keys):
+
+```bash
+python -m configkit diff base.yaml deployed.yaml
+# host: replaced (old -> new)
+# timeout: removed (30)
+# debug: added (True)
+# 3 change(s)
+```
+
+The left file is the base and the right file the override — same argument
+order as `merge`. Identical files print a single "are identical" line.
+Exit 0 on success, 1 if either file is missing or malformed.
+
 ## Errors
 
 - `ConfigError` — file missing, bad JSON/YAML syntax, wrong top-level type.
