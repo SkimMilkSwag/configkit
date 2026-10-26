@@ -75,12 +75,29 @@ def _read_raw(path: str) -> Dict[str, Any]:
     Format is inferred from the extension. Raises ``ConfigError`` on I/O or
     parse problems; raises ``ConfigError`` if the top level is not a dict.
     """
-    fmt = "yaml" if path.endswith((".yaml", ".yml")) else "json"
+    fmt = None
+    if path.endswith((".yaml", ".yml")):
+        fmt = "yaml"
+    elif path.endswith(".toml"):
+        fmt = "toml"
+    else:
+        fmt = "json"
     if not os.path.exists(path):
         raise ConfigError(f"config file not found: {path}")
     with open(path, "r", encoding="utf-8") as fh:
         text = fh.read()
-    if fmt == "json":
+    if fmt == "toml":
+        try:
+            from .core import _parse_toml  # local parser lives with the loader
+        except ImportError as exc:
+            raise ConfigError(f"cannot parse TOML: {exc}") from exc
+        try:
+            data = _parse_toml(text)
+        except ConfigError as exc:
+            raise exc
+        except Exception as exc:
+            raise ConfigError(f"invalid TOML: {exc}") from exc
+    elif fmt == "json":
         try:
             data = _json.loads(text)
         except _json.JSONDecodeError as exc:

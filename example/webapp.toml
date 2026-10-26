@@ -1,0 +1,15 @@
+# Example config file (TOML) for the configkit integration test.
+# Same shape as webapp.json / webapp.yaml, different values — exercises the
+# TOML code path end-to-end (parse -> env substitution -> schema validation ->
+# Config), including a ${VAR} placeholder and a nested [db] table.
+host = "toml.internal"
+port = 7070
+workers = 6
+mode = "safe"
+tags = ["web", "batch"]
+log_level = "${LOG_LEVEL:info}"
+
+[db]
+user = "app_toml"
+password = "toml-pass"
+pool_size = 15

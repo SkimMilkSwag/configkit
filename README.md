@@ -1,6 +1,7 @@
 # configkit
 
-A tiny **type-safe config loader** for YAML and JSON files, with declarative validation.
+A tiny **type-safe config loader** for JSON, YAML and TOML files, with
+declarative validation.
 
 Load a config file, validate it against a schema, and get an immutable,
 attribute-accessible object back. Unknown keys are rejected by default so
@@ -22,7 +23,15 @@ typos fail loudly instead of silently producing `None`.
 ```bash
 pip install .            # JSON only (pure stdlib)
 pip install .[yaml]      # + PyYAML for YAML support
+pip install .[toml]      # + tomli for TOML on Python 3.10 and earlier
 ```
+
+TOML parsing uses `tomllib` from the stdlib on Python 3.11+, `tomli` (the
+`toml` extra) on 3.8-3.10, and falls back to a built-in mini-parser that
+covers the subset config files actually need — `[table]` headers (including
+dotted paths), key = value lines (bare, quoted and dotted keys), comments,
+and scalar/inline-array values. Datetimes and multi-line strings raise a
+clear `ConfigError` from the mini-parser; on 3.11+ the full spec works.
 
 ## Usage
 
@@ -86,7 +95,7 @@ rather than leaking through as an empty string.
 Validate a config file against a schema from the command line (CI-friendly):
 
 ```bash
-python -m configkit config.yaml --schema schema.yaml
+python -m configkit config.yaml --schema schema.yaml   # or .json / .toml — inferred by extension
 # exit 0 + "config.yaml: OK" on success
 # exit 1 + one line per problem on stderr on failure
 ```

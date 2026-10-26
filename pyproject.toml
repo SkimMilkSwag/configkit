@@ -1,7 +1,7 @@
 [project]
 name = "configkit"
 version = "0.1.0"
-description = "A tiny type-safe config loader for YAML and JSON files with declarative validation."
+description = "A tiny type-safe config loader for JSON, YAML and TOML files with declarative validation."
 requires-python = ">=3.8"
 
 [build-system]
@@ -10,6 +10,9 @@ build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
 yaml = ["PyYAML>=5.4"]
+# TOML: tomllib is stdlib on 3.11+; this keeps `pip install .` working on
+# 3.8-3.10 interpreters (a built-in mini-parser covers the rest).
+toml = ["tomli>=1.2; python_version < '3.11'"]
 
 [tool.setuptools.packages.find]
 include = ["configkit*"]
