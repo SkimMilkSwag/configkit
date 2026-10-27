@@ -104,6 +104,15 @@ The schema file is JSON or YAML; type names are written as strings (`"int"`,
 `"str"`, ...) and resolved automatically. The `check` subcommand is optional —
 omitting it runs the same check.
 
+For machine consumption, `--json` prints a single JSON object on stdout
+(`{"file", "ok", "problems"}`) instead of the human-readable lines; exit codes
+are unchanged, so `configkit ... --json | jq -e .ok` works in CI:
+
+```bash
+python -m configkit config.yaml --schema schema.yaml --json
+# {"file": "...", "ok": false, "problems": ["port: expected int, got str"]}
+```
+
 ## Merging config files
 
 Layer a base config with overrides (12-factor style): later files win, dicts

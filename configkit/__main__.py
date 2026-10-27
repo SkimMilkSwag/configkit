@@ -202,17 +202,31 @@ def render_merged(doc: Dict[str, Any], fmt: str) -> str:
     raise ConfigError(f"unsupported output format {fmt!r} (use 'json' or 'yaml')")
 
 
-def _run_check(config_path: str, schema_path: str) -> int:
+def _run_check(config_path: str, schema_path: str, as_json: bool = False) -> int:
     try:
         schema = _load_schema(schema_path)
     except ValidationError as exc:
-        print(f"{exc.path}: {exc.message}", file=sys.stderr)
+        if not as_json:
+            print(f"{exc.path}: {exc.message}", file=sys.stderr)
+        else:
+            print(_json.dumps({"file": config_path, "ok": False,
+                               "problems": [f"{exc.path}: {exc.message}"]}))
         return 1
     except ConfigError as exc:
-        print(f"{schema_path}: {exc}", file=sys.stderr)
+        if not as_json:
+            print(f"{schema_path}: {exc}", file=sys.stderr)
+        else:
+            print(_json.dumps({"file": config_path, "ok": False,
+                               "problems": [f"{schema_path}: {exc}"]}))
         return 1
 
     problems = check_file(config_path, schema)
+    if as_json:
+        # stdout-only, machine-consumable: one JSON object regardless of the
+        # exit code, so `configkit --json ... | jq` works in CI pipelines.
+        print(_json.dumps({"file": config_path, "ok": not problems,
+                           "problems": problems}, indent=2))
+        return 1 if problems else 0
     if not problems:
         print(f"{config_path}: OK")
         return 0
@@ -323,6 +337,11 @@ def main(argv: "List[str] | None" = None) -> int:
     )
     check_p.add_argument("config", help="path to the config file to check")
     check_p.add_argument("--schema", required=True, help="path to the schema file (JSON or YAML)")
+    check_p.add_argument(
+        "--json", dest="as_json", action="store_true",
+        help='print the result as a JSON object {"file", "ok", "problems"} on stdout '
+             "instead of the human-readable lines (exit codes unchanged)",
+    )
 
     merge_p = subparsers.add_parser(
         "merge", help="merge config files (later wins, deep merge); print the result"
@@ -351,7 +370,7 @@ def main(argv: "List[str] | None" = None) -> int:
         return _run_merge(list(args.configs), args.fmt)
     if getattr(args, "command", None) == "diff":
         return _run_diff(list(args.configs))
-    return _run_check(args.config, args.schema)
+    return _run_check(args.config, args.schema, as_json=getattr(args, "as_json", False))
 
 
 if __name__ == "__main__":

@@ -97,3 +97,43 @@ def test_wrong_type_reported_with_key(tmp_path):
     proc = _run_cli(str(cfg), "--schema", str(schema))
     assert proc.returncode == 1
     assert "port:" in proc.stderr
+
+
+def test_check_json_mode_valid_exits_zero(tmp_path):
+    schema = tmp_path / "s.yaml"
+    schema.write_text(SCHEMA_YAML)
+    cfg = tmp_path / "c.json"
+    cfg.write_text(json.dumps({"host": "example.com", "port": 8080}))
+
+    proc = _run_cli(str(cfg), "--schema", str(schema), "--json")
+    assert proc.returncode == 0, proc.stderr
+    body = json.loads(proc.stdout)
+    assert body["file"] == str(cfg)
+    assert body["ok"] is True
+    assert body["problems"] == []
+    # JSON mode is stdout-only: nothing leaks to stderr
+    assert proc.stderr == ""
+
+
+def test_check_json_mode_invalid_exits_one(tmp_path):
+    schema = tmp_path / "s.yaml"
+    schema.write_text(SCHEMA_YAML)
+    cfg = tmp_path / "c.json"
+    cfg.write_text(json.dumps({"host": "x", "port": 99999}))
+
+    proc = _run_cli(str(cfg), "--schema", str(schema), "--json")
+    assert proc.returncode == 1
+    body = json.loads(proc.stdout)
+    assert body["ok"] is False
+    assert len(body["problems"]) >= 1
+    assert any("port" in line for line in body["problems"])
+
+
+def test_check_json_mode_missing_file_is_structured(tmp_path):
+    schema = tmp_path / "s.yaml"
+    schema.write_text(SCHEMA_YAML)
+    proc = _run_cli(str(tmp_path / "nope.json"), "--schema", str(schema), "--json")
+    assert proc.returncode == 1
+    body = json.loads(proc.stdout)
+    assert body["ok"] is False
+    assert any("not found" in line for line in body["problems"])
