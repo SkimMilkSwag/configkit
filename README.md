@@ -90,6 +90,19 @@ cfg = loads('{"dsn": "${DB_USER}:${DB_PASS}@${HOST:localhost}"}',
 Unset variables without a default raise `EnvError` — a typo'd name fails loudly
 rather than leaking through as an empty string.
 
+The CLI can take those variables from an explicit file instead of the ambient
+environment, which keeps CI runs reproducible regardless of what the runner
+happens to have exported:
+
+```bash
+# vars.env:  KEY=VALUE lines, # comments and blank lines allowed,
+#            quoted values stripped, export FOO=bar accepted
+python -m configkit config.yaml --schema schema.yaml --env-file vars.env
+```
+
+File variables win over the ambient environment for any name present in both;
+a placeholder missing from both still fails (exit 1).
+
 ## CLI checker
 
 Validate a config file against a schema from the command line (CI-friendly):

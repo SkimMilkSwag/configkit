@@ -15,15 +15,21 @@ Resolution is applied recursively to every value in the raw document (string
 values in lists and nested mappings included) before any schema validation,
 so a substituted value must pass the same type/bound checks as a literal one.
 Non-string values (numbers, booleans, ``null``) pass through untouched.
+
+Variables can come from the process environment or from an explicit file
+(``load_env_file``): KEY=VALUE lines, ``#`` comments, optional quoting around
+the value, and blank lines. A value given in both places wins over the
+ambient environment so a checked-in .env file stays authoritative for CI
+runs.
 """
 
 from __future__ import annotations
 
 import os
 import re
-from typing import Any, Callable, Mapping, Optional, Union
+from typing import Any, Callable, Dict, Mapping, Optional, Union
 
-__all__ = ["EnvError", "resolve_env"]
+__all__ = ["EnvError", "load_env_file", "resolve_env"]
 
 # A placeholder is ${ NAME } or ${ NAME : default }. The name must start with a
 # letter/underscore (mirroring shell convention) and may continue with letters,
@@ -108,3 +114,49 @@ def resolve_env(
         return node
 
     return walk(data)
+
+
+# A KEY=VALUE line: the key is a shell-style identifier, the value runs to
+# end of line and may be wrapped in single or double quotes (which are
+# stripped). `export FOO=bar` is accepted too — most shells emit that form.
+_ENV_LINE = re.compile(
+    r"""^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$"""
+)
+
+
+def load_env_file(path: str) -> Dict[str, str]:
+    """Parse a KEY=VALUE env file into a plain dict.
+
+    Accepted per line: ``KEY=VALUE`` (optionally ``export KEY=VALUE``),
+    blank lines, and ``#`` comment lines (a full-line comment; inline
+    comments after an unquoted value are not supported, matching the
+    behaviour most .env loaders take on values that can contain '#').
+    A quoted value keeps everything between the quotes verbatim; an
+    unquoted value is taken as-is with surrounding whitespace stripped.
+    Later lines override earlier ones for the same key.
+
+    Raises :class:`EnvError` on a line that matches neither form, so a
+    typo'd variable name or a missing '=' fails loudly instead of being
+    silently ignored.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+    except OSError as exc:
+        raise EnvError(f"cannot read env file {path}: {exc}", path) from exc
+
+    out: Dict[str, str] = {}
+    for lineno, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = _ENV_LINE.match(line)
+        if match is None:
+            raise EnvError(
+                f"{path}:{lineno}: expected KEY=VALUE, got {stripped!r}", path
+            )
+        key, value = match.group(1), match.group(2)
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        out[key] = value
+    return out

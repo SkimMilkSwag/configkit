@@ -30,9 +30,10 @@ import copy
 import json as _json
 import os
 import sys
-from typing import Any, Dict, List, Tuple, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from .core import ConfigError
+from .env import EnvError, load_env_file
 from .schema import Spec, ValidationError, _spec_from_any
 
 # Type-name string -> Python type. YAML/JSON schema files reference types by
@@ -131,16 +132,24 @@ def _load_schema(path: str) -> Dict[str, Spec]:
     return schema
 
 
-def check_file(config_path: str, schema: Dict[str, Spec]) -> List[str]:
+def check_file(
+    config_path: str,
+    schema: Dict[str, Spec],
+    env: "Optional[Dict[str, str]]" = None,
+) -> List[str]:
     """Validate ``config_path`` against ``schema``; return problem lines.
 
     An empty list means the file is valid. Each line is ``<json-path>:
     <message>`` -- linter-style, one per failure, ready for CI logs.
+
+    When ``env`` (a KEY -> value mapping from an --env-file) is given,
+    ``${VAR}`` placeholders in the config are resolved against it instead of
+    the ambient environment before validation runs.
     """
     from .core import load  # avoid circular import at module top
 
     try:
-        load(config_path, schema)
+        load(config_path, schema, env=env)
         return []
     except ValidationError as exc:
         return [f"{exc.path}: {exc.message}"]
@@ -202,7 +211,24 @@ def render_merged(doc: Dict[str, Any], fmt: str) -> str:
     raise ConfigError(f"unsupported output format {fmt!r} (use 'json' or 'yaml')")
 
 
-def _run_check(config_path: str, schema_path: str, as_json: bool = False) -> int:
+def _run_check(
+    config_path: str,
+    schema_path: str,
+    as_json: bool = False,
+    env_file: "str | None" = None,
+) -> int:
+    env: "Dict[str, Any] | None" = None
+    if env_file is not None:
+        try:
+            env = load_env_file(env_file)
+        except EnvError as exc:
+            message = str(exc.args[0])
+            if not as_json:
+                print(f"{message}", file=sys.stderr)
+            else:
+                print(_json.dumps({"file": config_path, "ok": False,
+                                   "problems": [message]}))
+            return 1
     try:
         schema = _load_schema(schema_path)
     except ValidationError as exc:
@@ -220,7 +246,18 @@ def _run_check(config_path: str, schema_path: str, as_json: bool = False) -> int
                                "problems": [f"{schema_path}: {exc}"]}))
         return 1
 
-    problems = check_file(config_path, schema)
+    try:
+        problems = check_file(config_path, schema, env=env)
+    except EnvError as exc:
+        # A ${VAR} placeholder whose variable is missing from the (file or
+        # ambient) environment: surface it like any other problem line.
+        message = str(exc.args[0])
+        if not as_json:
+            print(f"{config_path}: {message}", file=sys.stderr)
+        else:
+            print(_json.dumps({"file": config_path, "ok": False,
+                               "problems": [f"{config_path}: {message}"]}))
+        return 1
     if as_json:
         # stdout-only, machine-consumable: one JSON object regardless of the
         # exit code, so `configkit --json ... | jq` works in CI pipelines.
@@ -375,6 +412,12 @@ def main(argv: "List[str] | None" = None) -> int:
         help='print the result as a JSON object {"file", "ok", "problems"} on stdout '
              "instead of the human-readable lines (exit codes unchanged)",
     )
+    check_p.add_argument(
+        "--env-file", metavar="PATH", default=None,
+        help="KEY=VALUE file whose variables resolve ${VAR} placeholders in the "
+             "config instead of the ambient environment (comments and blank lines "
+             "allowed; quoted values stripped)",
+    )
 
     merge_p = subparsers.add_parser(
         "merge", help="merge config files (later wins, deep merge); print the result"
@@ -414,7 +457,8 @@ def main(argv: "List[str] | None" = None) -> int:
         return _run_diff(list(args.configs))
     if getattr(args, "command", None) == "keys":
         return _run_keys(list(args.configs))
-    return _run_check(args.config, args.schema, as_json=getattr(args, "as_json", False))
+    return _run_check(args.config, args.schema, as_json=getattr(args, "as_json", False),
+                      env_file=getattr(args, "env_file", None))
 
 
 if __name__ == "__main__":
