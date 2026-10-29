@@ -24,9 +24,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # PyYAML is required for the YAML code path; pytest + mypy are the
-          # test/typecheck tools. configkit itself installs from source.
-          pip install .[yaml] pytest mypy
+          # PyYAML is required for the YAML code path; tomli is a real
+          # typing dependency (imported as the <3.11 TOML fallback) so mypy
+          # needs it even on 3.11+ where tomllib covers runtime. pytest +
+          # mypy are the test/typecheck tools. configkit itself installs
+          # from source.
+          pip install .[yaml] pytest mypy tomli
 
       - name: Run pytest
         run: python -m pytest tests/ -q
