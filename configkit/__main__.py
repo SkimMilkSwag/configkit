@@ -305,6 +305,39 @@ def _run_diff(paths: "List[str]") -> int:
     return 0
 
 
+def _iter_keys(doc: Any, prefix: str = "") -> List[str]:
+    """Return all dotted key paths in a config document, sorted.
+
+    Lists are traversed by index (``a.b.0.c``) so nested structures inside
+    arrays are covered. Scalars and empty containers contribute no keys of
+    their own — only dict members produce paths. The result is sorted so
+    output is stable for scripting / tab-completion consumers.
+    """
+    out: List[str] = []
+    if isinstance(doc, dict):
+        for key in doc:
+            path = f"{prefix}.{key}" if prefix else str(key)
+            out.append(path)
+            out.extend(_iter_keys(doc[key], path))
+    elif isinstance(doc, list):
+        for i, item in enumerate(doc):
+            out.extend(_iter_keys(item, f"{prefix}.{i}" if prefix else str(i)))
+    return sorted(out)
+
+
+def _run_keys(paths: List[str]) -> int:
+    """List all dotted key paths found in the given config file(s)."""
+    for path in paths:
+        try:
+            doc = _read_raw(path)
+        except ConfigError as exc:
+            print(f"configkit: {exc}", file=sys.stderr)
+            return 1
+        for key_path in _iter_keys(doc):
+            print(key_path)
+    return 0
+
+
 def _run_merge(paths: List[str], fmt: str) -> int:
     try:
         merged = merge_configs(paths)
@@ -323,7 +356,7 @@ def main(argv: "List[str] | None" = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # If no subcommand is given, treat the args as `check` so the historical
     # form `python -m configkit cfg.yaml --schema s.yaml` keeps working.
-    if not argv or argv[0] not in ("check", "merge", "diff"):
+    if not argv or argv[0] not in ("check", "merge", "diff", "keys"):
         argv = ["check"] + argv
 
     parser = argparse.ArgumentParser(
@@ -364,12 +397,23 @@ def main(argv: "List[str] | None" = None) -> int:
         help="two config files to compare (left is the base, right the override)",
     )
 
+    keys_p = subparsers.add_parser(
+        "keys",
+        help="list all dotted key paths in a config file (one per line) for scripting",
+    )
+    keys_p.add_argument(
+        "configs", nargs="+", metavar="CONFIG",
+        help="config file(s) to list keys from",
+    )
+
     args = parser.parse_args(argv)
 
     if getattr(args, "command", None) == "merge":
         return _run_merge(list(args.configs), args.fmt)
     if getattr(args, "command", None) == "diff":
         return _run_diff(list(args.configs))
+    if getattr(args, "command", None) == "keys":
+        return _run_keys(list(args.configs))
     return _run_check(args.config, args.schema, as_json=getattr(args, "as_json", False))
 
 
