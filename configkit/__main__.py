@@ -375,6 +375,85 @@ def _run_keys(paths: List[str]) -> int:
     return 0
 
 
+def lookup_path(doc: Any, dotted: str) -> Any:
+    """Walk ``dotted`` (e.g. ``a.b.0.c``) into ``doc`` and return the value.
+
+    Dict members are walked by key name; list members by integer index (so a
+    path is exactly the form :func:`_iter_keys` prints, which means
+    ``configkit keys`` output pipes straight back into ``configkit get``).
+    Raises ``KeyError`` for a missing dict key and ``IndexError`` for an
+    out-of-range or non-numeric list index.
+    """
+    cur: Any = doc
+    for segment in dotted.split("."):
+        if isinstance(cur, dict):
+            if segment not in cur:
+                raise KeyError(segment)
+            cur = cur[segment]
+        elif isinstance(cur, list):
+            try:
+                idx = int(segment)
+            except ValueError as exc:
+                raise IndexError(f"{segment!r} is not a list index") from exc
+            if idx < -len(cur) or idx >= len(cur):
+                raise IndexError(f"list index {idx} out of range")
+            cur = cur[idx]
+        else:
+            # scalar (or None) where a container was expected: the path
+            # descends past a leaf, so report the type mismatch cleanly
+            raise KeyError(
+                f"{segment!r}: cannot descend into {type(cur).__name__}"
+            )
+    return cur
+
+
+def _render_get_value(value: Any) -> str:
+    """Render one value for ``get`` output.
+
+    Strings print bare (the common case — `configkit get cfg.yaml db.host | xargs`
+    must not quote its argument); everything else uses the same compact form
+    as ``diff``'s `_format_value` so numbers, booleans, None and containers are
+    unambiguous for a shell consumer.
+    """
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return "null"
+    return repr(value)
+
+
+def _run_get(paths: List[str], dotted: str) -> int:
+    """Print the value at ``dotted`` in each given config file.
+
+    Exit 0 when every lookup succeeds; 1 on any I/O/format problem or a path
+    that does not resolve (missing key, bad index, descent into a scalar) —
+    one line per failing location on stderr so it is obvious which file/path
+    broke in a multi-file call.
+    """
+    status = 0
+    for path in paths:
+        try:
+            doc = _read_raw(path)
+        except ConfigError as exc:
+            print(f"configkit: {exc}", file=sys.stderr)
+            return 1
+        try:
+            value = lookup_path(doc, dotted)
+        except KeyError as exc:
+            print(
+                f"{path}: no key {dotted!r} (missing segment {exc.args[0]!r})",
+                file=sys.stderr,
+            )
+            status = 1
+            continue
+        except IndexError as exc:
+            print(f"{path}: bad index in {dotted!r}: {exc.args[0]}", file=sys.stderr)
+            status = 1
+            continue
+        print(_render_get_value(value))
+    return status
+
+
 def _run_merge(paths: List[str], fmt: str) -> int:
     try:
         merged = merge_configs(paths)
@@ -393,7 +472,7 @@ def main(argv: "List[str] | None" = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     # If no subcommand is given, treat the args as `check` so the historical
     # form `python -m configkit cfg.yaml --schema s.yaml` keeps working.
-    if not argv or argv[0] not in ("check", "merge", "diff", "keys"):
+    if not argv or argv[0] not in ("check", "merge", "diff", "keys", "get"):
         argv = ["check"] + argv
 
     parser = argparse.ArgumentParser(
@@ -449,6 +528,20 @@ def main(argv: "List[str] | None" = None) -> int:
         help="config file(s) to list keys from",
     )
 
+    get_p = subparsers.add_parser(
+        "get",
+        help="print the value at a dotted path (e.g. db.host or server.tls.0)",
+    )
+    get_p.add_argument(
+        "configs", nargs="+", metavar="CONFIG",
+        help="config file(s) to look up in",
+    )
+    get_p.add_argument(
+        "key", metavar="DOTTED.KEY",
+        help="dotted path into the document; list members are addressed by "
+             "index (the same paths `keys` prints)",
+    )
+
     args = parser.parse_args(argv)
 
     if getattr(args, "command", None) == "merge":
@@ -457,6 +550,8 @@ def main(argv: "List[str] | None" = None) -> int:
         return _run_diff(list(args.configs))
     if getattr(args, "command", None) == "keys":
         return _run_keys(list(args.configs))
+    if getattr(args, "command", None) == "get":
+        return _run_get(list(args.configs), args.key)
     return _run_check(args.config, args.schema, as_json=getattr(args, "as_json", False),
                       env_file=getattr(args, "env_file", None))
 

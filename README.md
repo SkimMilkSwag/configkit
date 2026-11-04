@@ -159,6 +159,31 @@ The left file is the base and the right file the override — same argument
 order as `merge`. Identical files print a single "are identical" line.
 Exit 0 on success, 1 if either file is missing or malformed.
 
+## Looking up a value (`get`)
+
+Print the value at a dotted path, for scripting and tab-completion pipelines:
+
+```bash
+python -m configkit get config.yaml db.host
+# localhost
+python -m configkit get config.yaml server.tls.0   # list members by index
+```
+
+Strings print bare (no quotes), so `configkit get cfg.yaml db.host | xargs ...`
+composes directly with other tools; numbers, booleans and containers use a
+compact `repr`-style form, and `null` stands for JSON/YAML null. A path that
+does not resolve — missing key, out-of-range index, or descending into a
+scalar — exits 1 with one line on stderr naming the file and the failing
+segment:
+
+```bash
+python -m configkit get config.yaml nope.host
+# config.yaml: no key 'nope.host' (missing segment 'nope')   # exit 1
+```
+
+The path syntax is exactly what `keys` prints, so `keys` output pipes straight
+back into `get`.
+
 ## Errors
 
 - `ConfigError` — file missing, bad JSON/YAML syntax, wrong top-level type.
