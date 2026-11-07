@@ -363,6 +363,38 @@ def _resolve(data: Any, env: Union[Mapping[str, str], Callable[[str], Optional[s
     return resolve_env(data, env=env)
 
 
+def _parse_document(text: str, fmt: str) -> Dict[str, Any]:
+    """Parse ``text`` as JSON/YAML/TOML into a plain dict.
+
+    Raises ``ConfigError`` on a format error or when the top level is not a
+    mapping/object. Shared by :func:`loads` and :func:`_load_raw_dict`.
+    """
+    if fmt == "json":
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ConfigError(f"invalid JSON: {exc}") from exc
+    elif fmt == "toml":
+        try:
+            data = _parse_toml(text)
+        except ConfigError as exc:
+            raise exc
+        except Exception as exc:
+            raise ConfigError(f"invalid TOML: {exc}") from exc
+    else:
+        try:
+            import yaml  # type: ignore[import-untyped]
+        except ImportError as exc:  # pragma: no cover - depends on env
+            raise ConfigError("PyYAML is required to load YAML files") from exc
+        try:
+            data = yaml.safe_load(text)
+        except yaml.YAMLError as exc:
+            raise ConfigError(f"invalid YAML: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ConfigError("top-level value must be a mapping/object")
+    return cast(Dict[str, Any], data)
+
+
 def loads(
     text: str,
     schema: Mapping[str, Union[Spec, type, Sequence[type]]],
@@ -379,33 +411,7 @@ def loads(
     """
     if fmt not in ("json", "yaml", "toml"):
         raise ConfigError(f"unsupported format {fmt!r} (use 'json', 'yaml' or 'toml')")
-    if fmt == "json":
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise ConfigError(f"invalid JSON: {exc}") from exc
-        if not isinstance(data, dict):
-            raise ConfigError("top-level value must be a mapping/object")
-    elif fmt == "toml":
-        try:
-            data = _parse_toml(text)
-        except ConfigError as exc:
-            raise exc
-        except Exception as exc:
-            raise ConfigError(f"invalid TOML: {exc}") from exc
-        if not isinstance(data, dict):
-            raise ConfigError("top-level value must be a mapping/object")
-    else:
-        try:
-            import yaml  # type: ignore[import-untyped]
-        except ImportError as exc:  # pragma: no cover - depends on env
-            raise ConfigError("PyYAML is required to load YAML files") from exc
-        try:
-            data = yaml.safe_load(text)
-        except yaml.YAMLError as exc:
-            raise ConfigError(f"invalid YAML: {exc}") from exc
-        if not isinstance(data, dict):
-            raise ConfigError("top-level value must be a mapping/object")
+    data = _parse_document(text, fmt)
 
     if env is not None:
         data = _resolve(data, env)
@@ -434,3 +440,21 @@ def load(
         else:
             fmt = "json"
     return loads(_read_source(path), schema, fmt=fmt, env=env)
+
+
+def _load_raw_dict(path: str, fmt: Union[str, None] = None) -> Dict[str, Any]:
+    """Read and parse a config file into a plain dict, with no validation.
+
+    Same extension/format inference as :func:`load`. Returns the raw document
+    so callers can run their own (or all-of-it) checks before wrapping in a
+    ``Config``. Raises ``ConfigError`` on I/O or format problems and when the
+    top level is not a mapping/object.
+    """
+    if fmt is None:
+        if path.endswith((".yaml", ".yml")):
+            fmt = "yaml"
+        elif path.endswith(".toml"):
+            fmt = "toml"
+        else:
+            fmt = "json"
+    return _parse_document(_read_source(path), fmt)

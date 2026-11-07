@@ -219,3 +219,49 @@ def validate(
     if unknown:
         raise ValidationError(path, "unknown key(s): %s" % ", ".join(sorted(unknown)))
     return result
+
+
+def collect_errors(
+    data: Dict[str, Any],
+    schema: Mapping[str, Union[Spec, Type[Any], Sequence[Type[Any]]]],
+    path: str = "$",
+) -> List[Tuple[str, str]]:
+    """Validate ``data`` against ``schema`` and return every failure as (path, message).
+
+    The same rules as :func:`validate` apply, but instead of raising on the
+    first problem each failing key is recorded and the walk continues, so a
+    single call reports everything that is wrong with the document at once —
+    the CI-friendly "fix them all in one run" mode. Nested dict keys are
+    collected the same way; an empty list means the data is valid.
+    """
+    errors: List[Tuple[str, str]] = []
+    if not isinstance(data, dict):
+        return [(path, "expected a mapping, got %s" % type(data).__name__)]
+
+    for key, raw in schema.items():
+        spec = _spec_from_any(raw, path)
+        child_path = f"{path}.{key}" if path != "$" else key
+        if key in data:
+            value = data[key]
+        elif spec.has_default or _default_for(spec) is not None:
+            continue  # default (explicit or implicit []) stands in; nothing to check
+        else:
+            errors.append((child_path, "required key is missing"))
+            continue
+
+        try:
+            coerce_value(value, spec, child_path)
+        except ValidationError as exc:
+            if spec.schema is not None and isinstance(data.get(key), dict):
+                # A raise here is the *first* nested failure (coerce_value
+                # recurses into spec.schema and stops at the first bad inner
+                # key); re-walk the nested document so every failing inner key
+                # is reported, starting with this same one.
+                errors.extend(collect_errors(data[key], spec.schema, child_path))
+            else:
+                errors.append((exc.path, exc.message))
+
+    unknown = set(data) - set(schema)
+    if unknown:
+        errors.append((path, "unknown key(s): %s" % ", ".join(sorted(unknown))))
+    return errors

@@ -139,22 +139,28 @@ def check_file(
 ) -> List[str]:
     """Validate ``config_path`` against ``schema``; return problem lines.
 
-    An empty list means the file is valid. Each line is ``<json-path>:
-    <message>`` -- linter-style, one per failure, ready for CI logs.
+    An empty list means the file is valid. Every failing key is reported —
+    not just the first one — so a bad file lists all of its problems in a
+    single run (each line is ``<json-path>: <message>``, linter-style, ready
+    for CI logs). Problems are ordered by schema key order, with the unknown-
+    key sweep last; a document that fails to parse or an unresolvable
+    ``${VAR}`` placeholder produces a single problem line for the file.
 
     When ``env`` (a KEY -> value mapping from an --env-file) is given,
     ``${VAR}`` placeholders in the config are resolved against it instead of
     the ambient environment before validation runs.
     """
-    from .core import load  # avoid circular import at module top
+    from .core import _load_raw_dict  # avoid circular import at module top
 
     try:
-        load(config_path, schema, env=env)
-        return []
-    except ValidationError as exc:
-        return [f"{exc.path}: {exc.message}"]
+        data = _load_raw_dict(config_path)
     except ConfigError as exc:
         return [f"{config_path}: {exc}"]
+    if env is not None:
+        from .env import resolve_env as _resolve_env
+        data = _resolve_env(data, env)
+    from .schema import collect_errors
+    return [f"{p}: {m}" for p, m in collect_errors(data, schema)]
 
 
 # --- merge -------------------------------------------------------------------
