@@ -113,6 +113,12 @@ python -m configkit config.yaml --schema schema.yaml   # or .json / .toml — in
 # exit 1 + one line per problem on stderr on failure
 ```
 
+A failing file reports *every* problem in one run, not just the first: each
+failing key gets its own `<key>: <message>` line (nested sections included),
+ordered by schema key with unknown keys last — fix them all without re-running
+once per typo. A document that cannot be parsed at all (bad JSON/YAML) or a
+`${VAR}` placeholder with no value still produces a single file-level line.
+
 The schema file is JSON or YAML; type names are written as strings (`"int"`,
 `"str"`, ...) and resolved automatically. The `check` subcommand is optional —
 omitting it runs the same check.
