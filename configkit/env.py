@@ -41,10 +41,20 @@ _PLACEHOLDER = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::([^{}]*(?:\$\{[^{}]*
 
 
 class EnvError(Exception):
-    """Raised when a ``${VAR}`` placeholder references an unset variable."""
+    """Raised when ``${VAR}`` placeholders or env files hit a problem.
 
-    def __init__(self, var: str, value: str) -> None:
-        super().__init__(f"environment variable {var!r} is not set (in value {value!r})")
+    The default form reports an unset placeholder: ``environment variable
+    'NAME' is not set (in value '...')``, carrying the offending ``var`` and
+    the ``value`` it occurred in. A caller may also pass its own ready-made
+    ``message`` (used by :func:`load_env_file` for line-level problems) which
+    becomes the exception text verbatim, without the unset-variable wrapper.
+    """
+
+    def __init__(self, var: str, value: Optional[str] = None, message: Optional[str] = None) -> None:
+        if message is not None:
+            super().__init__(message)
+        else:
+            super().__init__(f"environment variable {var!r} is not set (in value {value!r})")
         self.var = var
         self.value = value
 
@@ -143,7 +153,9 @@ def load_env_file(path: str) -> Dict[str, str]:
         with open(path, "r", encoding="utf-8") as fh:
             text = fh.read()
     except OSError as exc:
-        raise EnvError(f"cannot read env file {path}: {exc}", path) from exc
+        raise EnvError(
+            "", message=f"cannot read env file {path}: {exc}"
+        ) from exc
 
     out: Dict[str, str] = {}
     for lineno, line in enumerate(text.splitlines(), start=1):
@@ -153,7 +165,7 @@ def load_env_file(path: str) -> Dict[str, str]:
         match = _ENV_LINE.match(line)
         if match is None:
             raise EnvError(
-                f"{path}:{lineno}: expected KEY=VALUE, got {stripped!r}", path
+                "", message=f"{path}:{lineno}: expected KEY=VALUE, got {stripped!r}"
             )
         key, value = match.group(1), match.group(2)
         if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
