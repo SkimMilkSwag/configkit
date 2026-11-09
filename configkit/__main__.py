@@ -149,6 +149,10 @@ def check_file(
     When ``env`` (a KEY -> value mapping from an --env-file) is given,
     ``${VAR}`` placeholders in the config are resolved against it instead of
     the ambient environment before validation runs.
+
+    Every returned line is ``<json-path>: <message>``; a single-file run
+    therefore prints exactly the historical format, and :func:`check_files`
+    re-prefixes each line with its file name when several files are checked.
     """
     from .core import _load_raw_dict  # avoid circular import at module top
 
@@ -161,6 +165,30 @@ def check_file(
         data = _resolve_env(data, env)
     from .schema import collect_errors
     return [f"{p}: {m}" for p, m in collect_errors(data, schema)]
+
+
+def check_files(
+    config_paths: "List[str]",
+    schema: Dict[str, Spec],
+    env: "Optional[Dict[str, str]]" = None,
+) -> List[str]:
+    """Validate each file in ``config_paths`` against ``schema``; return all problem lines.
+
+    Files are checked independently and in the given order: a parse failure
+    or an unresolvable placeholder in one file does not stop the others from
+    being validated, so a batch run reports every problem across the whole
+    set in a single pass (each line is ``<file>: <key>: <message>``). An
+    empty list means every file is valid. A single-file batch returns exactly
+    what :func:`check_file` returns for that file (no file prefix), so the
+    historical single-file output is byte-for-byte unchanged. See
+    :func:`check_file` for the per-file rules.
+    """
+    if len(config_paths) == 1:
+        return check_file(config_paths[0], schema, env=env)
+    lines: List[str] = []
+    for path in config_paths:
+        lines.extend(f"{path}: {line}" for line in check_file(path, schema, env=env))
+    return lines
 
 
 # --- merge -------------------------------------------------------------------
@@ -218,11 +246,14 @@ def render_merged(doc: Dict[str, Any], fmt: str) -> str:
 
 
 def _run_check(
-    config_path: str,
+    config_paths: "List[str]",
     schema_path: str,
     as_json: bool = False,
     env_file: "str | None" = None,
 ) -> int:
+    # All output for a multi-file run is attributed to the first file in the
+    # batch (the primary target); per-problem lines carry their own file name.
+    config_path = config_paths[0]
     env: "Dict[str, Any] | None" = None
     if env_file is not None:
         try:
@@ -253,7 +284,7 @@ def _run_check(
         return 1
 
     try:
-        problems = check_file(config_path, schema, env=env)
+        problems = check_files(config_paths, schema, env=env)
     except EnvError as exc:
         # A ${VAR} placeholder whose variable is missing from the (file or
         # ambient) environment: surface it like any other problem line.
@@ -271,7 +302,13 @@ def _run_check(
                            "problems": problems}, indent=2))
         return 1 if problems else 0
     if not problems:
-        print(f"{config_path}: OK")
+        # Single file keeps the historical one-line form; a batch reports the
+        # whole set as OK in one line (naming every file) instead of one
+        # indistinguishable "OK" per file.
+        if len(config_paths) == 1:
+            print(f"{config_path}: OK")
+        else:
+            print(", ".join(config_paths) + ": OK")
         return 0
     for line in problems:
         print(line, file=sys.stderr)
@@ -490,7 +527,12 @@ def main(argv: "List[str] | None" = None) -> int:
     check_p = subparsers.add_parser(
         "check", help="validate a config file against a schema (default command)"
     )
-    check_p.add_argument("config", help="path to the config file to check")
+    check_p.add_argument(
+        "configs", nargs="+", metavar="CONFIG",
+        help="config file(s) to check against the schema (one or more; every "
+             "file is validated in the same run and each problem line is "
+             "prefixed with its file name)",
+    )
     check_p.add_argument("--schema", required=True, help="path to the schema file (JSON or YAML)")
     check_p.add_argument(
         "--json", dest="as_json", action="store_true",
@@ -558,7 +600,7 @@ def main(argv: "List[str] | None" = None) -> int:
         return _run_keys(list(args.configs))
     if getattr(args, "command", None) == "get":
         return _run_get(list(args.configs), args.key)
-    return _run_check(args.config, args.schema, as_json=getattr(args, "as_json", False),
+    return _run_check(list(args.configs), args.schema, as_json=getattr(args, "as_json", False),
                       env_file=getattr(args, "env_file", None))
 
 
