@@ -67,6 +67,39 @@ def test_load_env_file_malformed_line_raises(tmp_path):
         load_env_file(p)
 
 
+def test_load_env_file_malformed_line_message_not_wrapped(tmp_path):
+    # The line-level message is the exception text verbatim: no doubled
+    # "environment variable '...' is not set" wrapper around it (the old bug).
+    p = _write(tmp_path, "env", "HOST=ok\nnot-a-pair\n")
+    with pytest.raises(EnvError) as exc_info:
+        load_env_file(p)
+    msg = str(exc_info.value)
+    assert msg == f"{p}:2: expected KEY=VALUE, got 'not-a-pair'"
+    assert "is not set" not in msg
+
+
+def test_load_env_file_missing_file_message_not_wrapped(tmp_path):
+    p = str(tmp_path / "nope.env")
+    with pytest.raises(EnvError) as exc_info:
+        load_env_file(p)
+    msg = str(exc_info.value)
+    assert msg.startswith("cannot read env file ")
+    assert "is not set" not in msg
+
+
+def test_env_error_placeholder_form_unchanged():
+    # the unset-placeholder rendering keeps its historical shape and fields
+    err = EnvError("NOPE", "${NOPE}")
+    assert str(err) == "environment variable 'NOPE' is not set (in value '${NOPE}')"
+    assert err.var == "NOPE"
+    assert err.value == "${NOPE}"
+
+
+def test_env_error_message_form_uses_verbatim_text():
+    err = EnvError("", message="custom text")
+    assert str(err) == "custom text"
+
+
 def test_load_env_file_missing_file_raises(tmp_path):
     with pytest.raises(EnvError, match="cannot read env file"):
         load_env_file(str(tmp_path / "nope.env"))
