@@ -405,8 +405,14 @@ def _iter_keys(doc: Any, prefix: str = "") -> List[str]:
     return sorted(out)
 
 
-def _run_keys(paths: List[str]) -> int:
-    """List all dotted key paths found in the given config file(s)."""
+def _run_keys(paths: List[str], with_values: bool = False) -> int:
+    """List all dotted key paths found in the given config file(s).
+
+    By default each path is printed bare (one per line, sorted), ready for
+    tab-completion or piping back into ``get``. With ``--values`` each line
+    becomes ``path = value`` (values rendered with the same compact form as
+    ``get``) so a single call can dump an entire config in scriptable form.
+    """
     for path in paths:
         try:
             doc = _read_raw(path)
@@ -414,7 +420,11 @@ def _run_keys(paths: List[str]) -> int:
             print(f"configkit: {exc}", file=sys.stderr)
             return 1
         for key_path in _iter_keys(doc):
-            print(key_path)
+            if with_values:
+                value = lookup_path(doc, key_path)
+                print(f"{key_path} = {_render_get_value(value)}")
+            else:
+                print(key_path)
     return 0
 
 
@@ -575,6 +585,11 @@ def main(argv: "List[str] | None" = None) -> int:
         "configs", nargs="+", metavar="CONFIG",
         help="config file(s) to list keys from",
     )
+    keys_p.add_argument(
+        "--values", action="store_true",
+        help="print 'path = value' lines (values rendered like the get "
+             "command) instead of bare paths",
+    )
 
     get_p = subparsers.add_parser(
         "get",
@@ -597,7 +612,7 @@ def main(argv: "List[str] | None" = None) -> int:
     if getattr(args, "command", None) == "diff":
         return _run_diff(list(args.configs))
     if getattr(args, "command", None) == "keys":
-        return _run_keys(list(args.configs))
+        return _run_keys(list(args.configs), with_values=getattr(args, "values", False))
     if getattr(args, "command", None) == "get":
         return _run_get(list(args.configs), args.key)
     return _run_check(list(args.configs), args.schema, as_json=getattr(args, "as_json", False),
