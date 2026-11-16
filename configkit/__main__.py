@@ -5,6 +5,7 @@ Usage::
     # check (default; also callable as `configkit check`)
     python -m configkit config.yaml --schema schema.yaml
     python -m configkit config.json --schema schema.json
+    python -m configkit override.yaml --schema schema.yaml --keys host,port
 
     # merge several config files (later wins, deep merge); prints the result
     python -m configkit merge base.yaml overrides.yaml
@@ -136,6 +137,7 @@ def check_file(
     config_path: str,
     schema: Dict[str, Spec],
     env: "Optional[Dict[str, str]]" = None,
+    keys: "Optional[List[str]]" = None,
 ) -> List[str]:
     """Validate ``config_path`` against ``schema``; return problem lines.
 
@@ -150,6 +152,12 @@ def check_file(
     ``${VAR}`` placeholders in the config are resolved against it instead of
     the ambient environment before validation runs.
 
+    When ``keys`` is given, only the listed schema keys are checked: their
+    values must satisfy the same constraints, and *every* other key in the
+    file is ignored (the unknown-key sweep is suppressed for those). The
+    env-override pattern — validating a sparse override file that carries
+    only a handful of keys against the full schema — is what this exists for.
+
     Every returned line is ``<json-path>: <message>``; a single-file run
     therefore prints exactly the historical format, and :func:`check_files`
     re-prefixes each line with its file name when several files are checked.
@@ -163,14 +171,29 @@ def check_file(
     if env is not None:
         from .env import resolve_env as _resolve_env
         data = _resolve_env(data, env)
+    subset: Dict[str, Spec]
+    if keys is None:
+        subset = schema
+    else:
+        seen: List[str] = []
+        for k in keys:
+            if k not in seen:
+                seen.append(k)
+        missing = [k for k in seen if k not in schema]
+        if missing:
+            return [
+                f"{config_path}: no such key(s) in schema: {', '.join(missing)}"
+            ]
+        subset = {k: schema[k] for k in seen}
     from .schema import collect_errors
-    return [f"{p}: {m}" for p, m in collect_errors(data, schema)]
+    return [f"{p}: {m}" for p, m in collect_errors(data, subset)]
 
 
 def check_files(
     config_paths: "List[str]",
     schema: Dict[str, Spec],
     env: "Optional[Dict[str, str]]" = None,
+    keys: "Optional[List[str]]" = None,
 ) -> List[str]:
     """Validate each file in ``config_paths`` against ``schema``; return all problem lines.
 
@@ -180,14 +203,16 @@ def check_files(
     set in a single pass (each line is ``<file>: <key>: <message>``). An
     empty list means every file is valid. A single-file batch returns exactly
     what :func:`check_file` returns for that file (no file prefix), so the
-    historical single-file output is byte-for-byte unchanged. See
-    :func:`check_file` for the per-file rules.
+    historical single-file output is byte-for-byte unchanged. The ``keys``
+    filter (see :func:`check_file`) applies to every file in the batch, so a
+    sparse override file can be checked alongside a full one in a single run.
+    See :func:`check_file` for the per-file rules.
     """
     if len(config_paths) == 1:
-        return check_file(config_paths[0], schema, env=env)
+        return check_file(config_paths[0], schema, env=env, keys=keys)
     lines: List[str] = []
     for path in config_paths:
-        lines.extend(f"{path}: {line}" for line in check_file(path, schema, env=env))
+        lines.extend(f"{path}: {line}" for line in check_file(path, schema, env=env, keys=keys))
     return lines
 
 
@@ -250,6 +275,7 @@ def _run_check(
     schema_path: str,
     as_json: bool = False,
     env_file: "str | None" = None,
+    keys: "list[str] | None" = None,
 ) -> int:
     # All output for a multi-file run is attributed to the first file in the
     # batch (the primary target); per-problem lines carry their own file name.
@@ -284,7 +310,7 @@ def _run_check(
         return 1
 
     try:
-        problems = check_files(config_paths, schema, env=env)
+        problems = check_files(config_paths, schema, env=env, keys=keys)
     except EnvError as exc:
         # A ${VAR} placeholder whose variable is missing from the (file or
         # ambient) environment: surface it like any other problem line.
@@ -555,6 +581,12 @@ def main(argv: "List[str] | None" = None) -> int:
              "config instead of the ambient environment (comments and blank lines "
              "allowed; quoted values stripped)",
     )
+    check_p.add_argument(
+        "--keys", metavar="KEY[,KEY...]", default=None,
+        help="check only these schema keys and ignore every other key in the file "
+             "(the env-override pattern: validate a sparse override against the "
+             "full schema; listed names must exist in the schema)",
+    )
 
     merge_p = subparsers.add_parser(
         "merge", help="merge config files (later wins, deep merge); print the result"
@@ -615,8 +647,12 @@ def main(argv: "List[str] | None" = None) -> int:
         return _run_keys(list(args.configs), with_values=getattr(args, "values", False))
     if getattr(args, "command", None) == "get":
         return _run_get(list(args.configs), args.key)
-    return _run_check(list(args.configs), args.schema, as_json=getattr(args, "as_json", False),
-                      env_file=getattr(args, "env_file", None))
+    key_arg: str | None = getattr(args, "keys", None)
+    keys = [k for k in key_arg.split(",") if k] if key_arg is not None else None
+    return _run_check(
+        list(args.configs), args.schema, as_json=getattr(args, "as_json", False),
+        env_file=getattr(args, "env_file", None), keys=keys,
+    )
 
 
 if __name__ == "__main__":
