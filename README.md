@@ -132,6 +132,29 @@ python -m configkit config.yaml --schema schema.yaml --json
 # {"file": "...", "ok": false, "problems": ["port: expected int, got str"]}
 ```
 
+### Checking only some keys (`--keys`)
+
+A full-schema run rejects *any* key the schema doesn't know about — right for
+a complete config file, wrong for a sparse override that deliberately carries
+only a handful of keys. `--keys` narrows the check to the listed schema keys;
+their constraints (bounds, patterns, choices, nested schemas) still apply, but
+every other key in the file is ignored:
+
+```bash
+# override.yaml contains just {"host": "prod.example.com"}
+python -m configkit override.yaml --schema schema.yaml --keys host
+# override.yaml: OK   (exit 0) — the missing 'port' and 'debug' are not your problem here
+
+python -m configkit override.yaml --schema schema.yaml --keys host,port
+# port: required key is missing   (exit 1) — a listed key you must satisfy
+```
+
+A `--keys` name that does not exist in the schema fails with one file-level
+line (`no such key(s) in schema: ...`) so a typo'd override name cannot pass
+silently. The filter applies to every file in a multi-file batch and composes
+with `--json` and `--env-file`; omitting it leaves the historical full-schema
+behaviour byte-for-byte unchanged.
+
 ## Merging config files
 
 Layer a base config with overrides (12-factor style): later files win, dicts
