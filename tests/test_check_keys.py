@@ -166,3 +166,79 @@ def test_check_files_api_keys_parameter(tmp_path):
     # (single-file runs carry no file prefix, by design)
     problems = cli.check_files([path], schema, keys=["port"])
     assert problems == ["port: required key is missing"]
+
+
+def test_keys_does_not_flag_unlisted_schema_keys_as_unknown(tmp_path, capsys):
+    # the core subset contract: a full config checked with only host listed
+    # must not report 'port' (a schema key that exists but is unlisted) or
+    # 'extra' (a file-only key) as unknown — both were filtered out on purpose
+    schema = _schema_file(tmp_path)
+    doc = {"host": "x", "port": 8080, "extra": "ignored"}
+    path = _write(tmp_path, "override.json", doc)
+
+    rc = cli.main(["check", path, "--schema", schema, "--keys", "host"])
+    out = capsys.readouterr()
+    assert rc == 0
+    assert out.out.strip() == f"{path}: OK"
+    assert out.err == ""
+
+
+def test_keys_still_reports_bad_value_on_listed_key(tmp_path, capsys):
+    # suppression is for the unknown-key sweep only: a listed key whose value
+    # violates its constraint is reported exactly as in full-schema mode
+    schema = _schema_file(tmp_path)
+    doc = {"host": 5}  # not a string
+    path = _write(tmp_path, "override.json", doc)
+
+    rc = cli.main(["check", path, "--schema", schema, "--keys", "host"])
+    out = capsys.readouterr()
+    assert rc == 1
+    assert out.err.splitlines() == ["host: expected str, got int"]
+
+
+def test_keys_nested_listed_section_keeps_inner_unknown_sweep(tmp_path, capsys):
+    # a listed dict key still validates its own section fully: an inner typo
+    # is caught by the nested unknown-key sweep even though the top-level
+    # sweep is suppressed in subset mode
+    nested_schema = _write(
+        tmp_path, "nested.json",
+        {"host": "str", "db": {"type": "dict", "schema": {"user": "str"}}},
+    )
+    doc = {"host": "x", "db": {"user": 5, "jnk": 1}}
+    path = _write(tmp_path, "override.json", doc)
+
+    rc = cli.main(["check", path, "--schema", nested_schema, "--keys", "db"])
+    out = capsys.readouterr()
+    assert rc == 1
+    lines = out.err.splitlines()
+    # the unlisted top-level 'host' is not flagged as unknown...
+    assert not any("unknown key(s): host" in line for line in lines)
+    # ...but the inner section reports both its problems: the bad value and
+    # the inner typo, in schema-key order then the sweep
+    assert "db.user: expected str, got int" in lines
+    assert "db: unknown key(s): jnk" in lines
+
+
+def test_collect_errors_suppress_unknown_is_structural(tmp_path):
+    # suppress_unknown drops only the top-level sweep; an unknown key that
+    # happens to contain the message's wording is not caught by string
+    # matching (the pre-fix approach filtered on "unknown key(s)" text)
+    from configkit.schema import collect_errors
+    data = {"host": "x", "unknown key(s)": 1}
+    full = collect_errors(data, {"host": str})
+    suppressed = collect_errors(data, {"host": str}, suppress_unknown=True)
+    assert [m for _, m in full] == ["unknown key(s): unknown key(s)"]
+    assert suppressed == []
+
+
+def test_without_keys_flag_still_reports_unlisted_keys(tmp_path, capsys):
+    # the historical full-schema run is byte-for-byte unchanged: without
+    # --keys, a file-only key trips the unknown-key sweep as before
+    schema = _schema_file(tmp_path)
+    doc = {"host": "x", "extra": 1}
+    path = _write(tmp_path, "override.json", doc)
+
+    rc = cli.main(["check", path, "--schema", schema])
+    out = capsys.readouterr()
+    assert rc == 1
+    assert any("unknown key(s): extra" in line for line in out.err.splitlines())
