@@ -186,7 +186,15 @@ def check_file(
             ]
         subset = {k: schema[k] for k in seen}
     from .schema import collect_errors
-    return [f"{p}: {m}" for p, m in collect_errors(data, subset)]
+    if keys is None:
+        return [f"{p}: {m}" for p, m in collect_errors(data, subset)]
+    # Subset mode: every key outside the list is intentionally ignored, so the
+    # file-level unknown-key sweep is suppressed — it would name unlisted
+    # schema keys (like a full config's 'port' when only host is checked) that
+    # were filtered out on purpose. Per-listed-key problems stay untouched;
+    # nested sections of a listed dict key keep their own sweep, so typos in
+    # an inner section of a *listed* key are still caught.
+    return [f"{p}: {m}" for p, m in collect_errors(data, subset, suppress_unknown=True)]
 
 
 def check_files(

@@ -225,6 +225,7 @@ def collect_errors(
     data: Dict[str, Any],
     schema: Mapping[str, Union[Spec, Type[Any], Sequence[Type[Any]]]],
     path: str = "$",
+    suppress_unknown: bool = False,
 ) -> List[Tuple[str, str]]:
     """Validate ``data`` against ``schema`` and return every failure as (path, message).
 
@@ -233,6 +234,12 @@ def collect_errors(
     single call reports everything that is wrong with the document at once —
     the CI-friendly "fix them all in one run" mode. Nested dict keys are
     collected the same way; an empty list means the data is valid.
+
+    With ``suppress_unknown`` the file-level unknown-key sweep is skipped:
+    keys absent from this schema are *intentionally* ignored rather than a
+    typo (the ``--keys`` subset mode). The check is structural, not textual —
+    an unknown key literally named "unknown key(s)" would still be reported
+    by the historical default.
     """
     errors: List[Tuple[str, str]] = []
     if not isinstance(data, dict):
@@ -262,6 +269,6 @@ def collect_errors(
                 errors.append((exc.path, exc.message))
 
     unknown = set(data) - set(schema)
-    if unknown:
+    if unknown and not suppress_unknown:
         errors.append((path, "unknown key(s): %s" % ", ".join(sorted(unknown))))
     return errors
