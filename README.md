@@ -155,6 +155,12 @@ silently. The filter applies to every file in a multi-file batch and composes
 with `--json` and `--env-file`; omitting it leaves the historical full-schema
 behaviour byte-for-byte unchanged.
 
+The suppression is scoped to the top level only: unlisted keys — whether they
+exist in the schema or not — are ignored, but a *listed* key is validated
+exactly as before, including nested sections (a typo inside a listed `db`
+section still fails with `db: unknown key(s): ...`). So checking a sparse
+override never produces false negatives for what you asked to check.
+
 ## Merging config files
 
 Layer a base config with overrides (12-factor style): later files win, dicts
