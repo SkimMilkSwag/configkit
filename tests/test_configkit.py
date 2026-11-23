@@ -101,7 +101,7 @@ def test_numeric_bounds_apply_to_floats_and_skip_non_numbers():
         loads(json.dumps({"host": "x", "port": 70000.5}), SCHEMA)
     # Out-of-range float on a numeric (int|float) field trips the bound check.
     wide = {"n": field((int, float), minimum=1, maximum=10)}
-    with pytest.raises(ValidationError, match="above maximum"):
+    with pytest.raises(ValidationError, match="does not fall below maximum"):
         loads(json.dumps({"n": 20.5}), wide)
     # A string value on a bounded spec must not trip the numeric comparison with
     # a TypeError -- it fails the type check first (and bounds are skipped for it).

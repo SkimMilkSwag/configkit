@@ -41,9 +41,9 @@ class Spec:
     ``types`` lists the accepted Python types (checked via ``isinstance``).
     ``default`` is applied when the key is absent from the source data;
     ``has_default`` distinguishes an explicit ``default=None`` from "no
-    default". Numeric bounds use the Python convention: ``minimum``/
-    ``maximum`` are inclusive; string bounds use ``min_length``/
-    ``max_length`` characters.
+    default". Numeric bounds use *exclusive* limits: a value equal to
+    ``minimum`` or ``maximum`` is rejected (the bound itself is not allowed);
+    string bounds use ``min_length``/``max_length`` characters.
     """
 
     types: Tuple[Type[Any], ...] = (str,)
@@ -146,15 +146,15 @@ def coerce_value(value: Any, spec: Spec, path: str) -> Any:
             path, "expected %s, got %s" % (spec.describe(), type(value).__name__)
         )
 
-    # Numeric bounds only apply to int/float values. Without this guard a str
-    # value carrying a minimum (e.g. a bounded-by-mistake string field, or a
-    # value that passed the type check before bounds were added) would trip the
-    # comparison and raise TypeError on Python 3 ("<" between str and int).
+    # Numeric bounds are *exclusive*: a value equal to the bound is rejected.
+    # They only apply to int/float values. Without this guard a str value
+    # carrying a minimum (e.g. a bounded-by-mistake string field) would trip
+    # the comparison and raise TypeError on Python 3 ("<" between str and int).
     if isinstance(value, (int, float)):
-        if spec.minimum is not None and value < spec.minimum:
-            raise ValidationError(path, "%r is below minimum %r" % (value, spec.minimum))
-        if spec.maximum is not None and value > spec.maximum:
-            raise ValidationError(path, "%r is above maximum %r" % (value, spec.maximum))
+        if spec.minimum is not None and value <= spec.minimum:
+            raise ValidationError(path, "%r does not exceed minimum %r" % (value, spec.minimum))
+        if spec.maximum is not None and value >= spec.maximum:
+            raise ValidationError(path, "%r does not fall below maximum %r" % (value, spec.maximum))
 
     if isinstance(value, str):
         if spec.min_length is not None and len(value) < spec.min_length:

@@ -68,8 +68,8 @@ def test_multi_file_reports_problems_from_every_file(tmp_path):
 
 def test_multi_file_all_valid_exits_zero(tmp_path):
     schema = _write(tmp_path, "s.yaml", SCHEMA_YAML)
-    a = _write(tmp_path, "a.json", {"host": "a", "port": 1})
-    b = _write(tmp_path, "b.json", {"host": "b", "port": 2})
+    a = _write(tmp_path, "a.json", {"host": "a", "port": 80})
+    b = _write(tmp_path, "b.json", {"host": "b", "port": 443})
 
     proc = _run_cli(a, b, "--schema", schema)
     assert proc.returncode == 0

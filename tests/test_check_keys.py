@@ -64,7 +64,7 @@ def test_keys_subset_still_enforces_constraints(tmp_path, capsys):
     out = capsys.readouterr()
     assert rc == 1
     lines = [line for line in out.err.splitlines() if "port" in line]
-    assert any("99999 is above maximum" in line for line in lines)
+    assert any("99999 does not fall below maximum" in line for line in lines)
 
 
 def test_keys_not_listed_are_not_checked_even_if_bad(tmp_path, capsys):
@@ -104,7 +104,7 @@ def test_keys_duplicate_and_order_preserved(tmp_path, capsys):
 
 def test_keys_json_mode(tmp_path, capsys):
     schema = _schema_file(tmp_path)
-    doc = {"host": "x", "port": 1, "extra": True}
+    doc = {"host": "x", "port": 8080, "extra": True}
     path = _write(tmp_path, "override.json", doc)
 
     rc = cli.main(["check", path, "--schema", schema, "--keys", "host,port", "--json"])
@@ -125,7 +125,7 @@ def test_keys_json_mode_failure_shape(tmp_path, capsys):
     assert rc == 1
     payload = json.loads(out.out)
     assert payload["ok"] is False
-    assert any("0 is below minimum" in p for p in payload["problems"])
+    assert any("0 does not exceed minimum" in p for p in payload["problems"])
 
 
 def test_keys_multi_file_batch_prefixes_lines(tmp_path, capsys):
@@ -137,7 +137,7 @@ def test_keys_multi_file_batch_prefixes_lines(tmp_path, capsys):
     out = capsys.readouterr()
     assert rc == 1
     lines = out.err.splitlines()
-    assert any(line.startswith(f"{bad}: ") and "70000 is above maximum" in line for line in lines)
+    assert any(line.startswith(f"{bad}: ") and "70000 does not fall below maximum" in line for line in lines)
     # the good file contributes nothing to stderr, and stdout stays clean
     assert out.out == ""
 
