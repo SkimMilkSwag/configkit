@@ -73,6 +73,11 @@ A schema entry can be:
 `max_length`, `pattern` (regex, fullmatch), `choices`, `schema` (nested),
 `items` (element spec for lists).
 
+Numeric bounds (`minimum`/`maximum`) are **exclusive**: a value equal to the
+bound is rejected. `field(int, minimum=1, maximum=65535)` accepts 2–65534,
+not 1 or 65535. String length bounds work the same way (`min_length`/
+`max_length` are exclusive character counts).
+
 ## Environment-variable substitution
 
 String values may contain `${VAR}` placeholders, resolved from the process

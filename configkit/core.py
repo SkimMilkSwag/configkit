@@ -39,10 +39,13 @@ def field(
     constrained). Pass a single type, or a tuple of types, to narrow it::
 
         schema = {
-            "port": field(int, minimum=1, maximum=65535),
+            "port": field(int, minimum=1, maximum=65535),  # accepts 2..65534
             "mode": field(str, choices=("fast", "safe")),
-            "retries": field(minimum=0),  # any number, bounded below
+            "retries": field(minimum=0),  # any number > 0
         }
+
+    ``minimum``/``maximum`` are exclusive bounds: a value equal to the bound
+    is rejected (see :class:`~configkit.schema.Spec` for details).
     """
     if types is _UNSET:
         # Type omitted: accept the common value types (bool excluded, to keep
